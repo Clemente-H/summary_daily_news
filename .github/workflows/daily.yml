@@ -1,0 +1,30 @@
+name: DailyNews
+
+on:
+  schedule:
+    - cron: "0 11 * * *"  # 8:00 AM Chile (UTC-3)
+  workflow_dispatch:       # también se puede disparar manualmente
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Run DailyNews
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          python main.py --limit 25 --notify "$NTFY_TOPIC"
