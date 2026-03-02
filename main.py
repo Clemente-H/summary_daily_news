@@ -10,12 +10,13 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from scrapers import Article, scrape_theclinic, scrape_latercera, scrape_elmercurio
+from categories import categorizar
 from notifications import notify_ntfy
 
 
 # ─── Deduplicación ────────────────────────────────────────────────────────────
 
-def deduplicate(articles: list[Article], threshold: float = 0.55) -> list[Article]:
+def deduplicate(articles: list[Article], threshold: float = 0.30) -> list[Article]:
     """
     Agrupa artículos similares por TF-IDF cosine similarity en títulos.
     De cada grupo conserva el mejor (con summary > sin summary).
@@ -98,12 +99,12 @@ def render_html(articles: list[Article]) -> str:
 
     items_html = ""
     for a in articles:
+        cat = categorizar(a.title)
         title_esc = html_module.escape(a.title)
         title_html = f'<a href="{a.url}" target="_blank">{title_esc}</a>' if a.url else title_esc
 
         meta = f'<span class="source">{html_module.escape(a.source)}</span>'
-        if a.category:
-            meta += f' · <span class="category">{html_module.escape(a.category)}</span>'
+        meta += f' · <span class="category">{cat}</span>'
 
         summary_html = f'<p class="summary">{html_module.escape(a.summary)}</p>' if a.summary else ""
 
@@ -161,23 +162,24 @@ def main():
     args = parser.parse_args()
 
     print("Scrapeando fuentes...")
-    all_articles = []
-
-    for label, fn in [
+    sources = [
         ("The Clinic (RSS)", scrape_theclinic),
-        ("La Tercera", scrape_latercera),
+        ("La Tercera",       scrape_latercera),
         ("El Mercurio Digital", scrape_elmercurio),
-    ]:
+    ]
+    scraped: dict[str, list[Article]] = {}
+    for label, fn in sources:
         print(f"  → {label}...")
         items = fn()
         print(f"     {len(items)} artículos")
-        all_articles.extend(items)
+        scraped[label] = items
 
-    print(f"\nTotal: {len(all_articles)} → ", end="")
-    deduped = deduplicate(all_articles)
-    print(f"{len(deduped)} tras deduplicar")
+    # Deduplicar primero dentro de cada fuente, luego entre fuentes
+    deduped_per_source = [deduplicate(items) for items in scraped.values()]
+    all_deduped = deduplicate([a for items in deduped_per_source for a in items])
+    print(f"\nTotal: {sum(len(v) for v in scraped.values())} → {len(all_deduped)} tras deduplicar")
 
-    final = interleave(deduped, args.limit)
+    final = interleave(all_deduped, args.limit)
 
     output_path = f"digest_{date.today().isoformat()}.html"
     with open(output_path, "w", encoding="utf-8") as f:
@@ -189,7 +191,8 @@ def main():
 
     print("\n─── Preview ───────────────────────────────────────────")
     for a in final[:10]:
-        print(f"[{a.source}] {a.title[:80]}")
+        cat = categorizar(a.title)
+        print(f"[{a.source}] [{cat}] {a.title[:70]}")
         if a.summary:
             print(f"    {a.summary[:100]}")
 
