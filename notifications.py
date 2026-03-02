@@ -6,7 +6,7 @@ from datetime import date
 import requests
 
 from scrapers import Article
-from categories import categorizar, ORDEN
+from categories import categorizar, ORDEN, SKIP_NOTIFY
 
 
 def notify_ntfy(topic: str, articles: list[Article]) -> None:
@@ -22,12 +22,18 @@ def notify_ntfy(topic: str, articles: list[Article]) -> None:
     cats_ordenadas = sorted(by_cat.keys(), key=lambda c: ORDEN.index(c) if c in ORDEN else 99)
 
     sections = []
+    skipped = 0
     for cat in cats_ordenadas:
+        if cat in SKIP_NOTIFY:
+            skipped += len(by_cat[cat])
+            continue
         lines = [f"── {cat} ──"]
         lines += [f"• {a.title}" for a in by_cat[cat]]
         sections.append("\n".join(lines))
 
-    body = f"{len(articles)} noticias · {date.today().strftime('%d/%m')}\n\n" + "\n\n".join(sections)
+    shown = len(articles) - skipped
+    footer = f"\n\n+ {skipped} de Cultura/Farándula" if skipped else ""
+    body = f"{shown} noticias · {date.today().strftime('%d/%m')}\n\n" + "\n\n".join(sections) + footer
 
     # ntfy tiene límite de 4096 bytes
     body = body.encode("utf-8")[:4096].decode("utf-8", errors="ignore")

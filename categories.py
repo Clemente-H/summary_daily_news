@@ -40,9 +40,29 @@ _CATEGORIAS: list[tuple[str, list[str]]] = [
         "hospital", "médico", "investigación", "estudio", "nasa", "planeta",
         "terremoto", "tsunami", "volcán", "clima", "cambio climático",
     ]),
+    # Farándula va al final para que no le gane a categorías más importantes
+    ("Farándula", [
+        "viña 2026", "festival de viña", "festival de la canción",
+        "farandula", "farándula", "telenovela", "teleserie", "reality",
+        "vivanco", "grimaldi", "príncipe alberto", "princesa", "realeza",
+        "actor", "actriz", "cantante", "modelo", "influencer",
+        "romance", "reveló", "confesó", "ruptura", "separación",
+        "alfombra roja", "look", "outfit",
+    ]),
+    ("Cultura", [
+        "libro", "novela", "autor", "escritor", "museo", "exposición",
+        "película", "estreno", "serie", "temporada", "concierto", "teatro",
+        "arte", "pintura", "arquitectura", "patrimonio",
+        "hace 30 años", "efeméride",
+        r"\¿lo digo bien\?", "academia chilena de la lengua",
+        "parches para", "hipocondría",
+    ]),
 ]
 
-ORDEN = ["Política", "Economía", "Mundo", "Deportes", "Ciencia", "Tecnología", "General"]
+ORDEN = ["Política", "Economía", "Mundo", "Deportes", "Ciencia", "Tecnología", "General", "Cultura", "Farándula"]
+
+# Categorías que se muestran en el HTML pero no en la notificación del teléfono
+SKIP_NOTIFY = {"Farándula", "Cultura"}
 
 
 def categorizar(title: str) -> str:
