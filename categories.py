@@ -29,6 +29,10 @@ _CATEGORIAS: list[tuple[str, list[str]]] = [
         "gol", "monumental", "superclásico", "copa", "mundial", "selección",
         "barrios", "maratón", "ciclismo", "básquetbol", "volleyball", "atletismo",
         "indian wells", "roland garros", "wimbledon", "us open",
+        "ñublense", "unión española", "audax italiano", "palestino", "cobreloa",
+        "huachipato", "cobresal", "antofagasta", "everton", "rangers",
+        "primera división", "segunda división", "anfp", "árbitro", "cancha",
+        "entrenador", "garnero", "técnico", "expulsión", "tarjeta roja",
     ]),
     ("Tecnología", [
         r"\bia\b", "inteligencia artificial", "anthropic", "openai", "google",

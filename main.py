@@ -6,27 +6,36 @@ import argparse
 import html as html_module
 from datetime import date
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer, util
 
 from scrapers import Article, scrape_theclinic, scrape_latercera, scrape_elmercurio
 from categories import categorizar
 from notifications import notify_ntfy
 
 
+_embed_model = None
+
+def _get_model():
+    global _embed_model
+    if _embed_model is None:
+        _embed_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+    return _embed_model
+
+
 # ─── Deduplicación ────────────────────────────────────────────────────────────
 
-def deduplicate(articles: list[Article], threshold: float = 0.30) -> list[Article]:
+def deduplicate(articles: list[Article], threshold: float = 0.75) -> list[Article]:
     """
-    Agrupa artículos similares por TF-IDF cosine similarity en títulos.
-    De cada grupo conserva el mejor (con summary > sin summary).
+    Agrupa artículos similares por similitud semántica.
+    Detecta la misma noticia aunque cada medio la redacte distinto.
     """
     if len(articles) < 2:
         return articles
 
     titles = [a.title for a in articles]
-    tfidf = TfidfVectorizer(ngram_range=(1, 2)).fit_transform(titles)
-    sim = cosine_similarity(tfidf)
+    model = _get_model()
+    embeddings = model.encode(titles, convert_to_tensor=True)
+    sim = util.cos_sim(embeddings, embeddings).cpu().numpy()
 
     parent = list(range(len(articles)))
 
