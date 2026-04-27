@@ -30,3 +30,4 @@ El workflow `.github/workflows/daily.yml` corre todos los días a las **8:00 AM 
 3. El workflow lo usa automáticamente — nada se guarda en el repo
 
 También se puede disparar manualmente desde la pestaña **Actions → Run workflow**.
+
