@@ -8,35 +8,60 @@ from scrapers import Article
 from categories import categorizar, SKIP_NOTIFY
 
 _MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
+_DEFAULT_MODEL = "mistral-large-latest"
 
 _DEDUP_PROMPT = """\
-Estas son noticias de medios chilenos. Identifica grupos que cubran el mismo hecho \
-y conserva solo la mejor versión de cada grupo (la más completa o informativa).
+Elimina duplicados de esta lista de noticias chilenas.
+
+DUPLICADO = dos artículos que reportan EL MISMO HECHO CONCRETO
+(mismo evento, misma jornada, mismos protagonistas).
+
+Ejemplo de DUPLICADO real:
+  "Crucero con hantavirus llega a Punta Arenas" (La Tercera)
+  "Pasajeros del MV Hondius vuelan a casa tras brote" (El Mercurio)
+  → mismo evento, quédate con el título más informativo
+
+Ejemplos de NO DUPLICADO:
+  Dos artículos sobre la megarreforma desde ángulos distintos → NO son duplicados
+  Dos columnas de opinión sobre el mismo tema → NUNCA son duplicados
+
+REGLA DE ORO: si hay duda, conserva AMBOS.
 
 {numbered}
 
-Responde ÚNICAMENTE con los índices de los artículos a conservar, separados por comas.
-Ejemplo: 0, 2, 5, 7, 12\
+Responde ÚNICAMENTE con los índices a conservar, separados por comas.\
 """
 
 _NOTIFY_PROMPT = """\
-Eres editor de un resumen noticioso chileno. Estas son las noticias del día:
+Formatea estas noticias chilenas para una notificación push.
 
-{headlines}
+FORMATO:
+- Agrupa por categoría: "── Categoría ──" y bullets "•"
+- Orden: Política, Economía, Mundo, Deportes, Ciencia, Tecnología, General
+- No incluyas categorías vacías
 
-Tarea:
-1. Selecciona las 5-7 más importantes e interesantes (descarta triviales, repetidas o de bajo impacto).
-2. Escribe el resumen como texto plano para una notificación push.
-3. Agrupa por categoría con el formato: "── Categoría ──" seguido de los titulares con "•".
-4. Máximo 700 caracteres en total.
-5. Sin emojis, sin markdown, solo texto plano.\
+TÍTULOS — acorta solo si tienen:
+- Citas textuales largas dentro del título → recorta la cita, conserva el hecho
+- Frases de relleno ("según dijo", "en declaraciones a", "tal como informó")
+- NUNCA elimines: nombres, números, lugares, quién hizo qué a quién
+
+ELIMINA solo estos tipos de artículo:
+- Columnas de opinión sin noticia concreta (título vago sin hechos, ej: "Vida en otros planetas")
+- Consejos/lifestyle ("X formas de...", "¿Cómo...?", "Por qué es importante...")
+- Farándula que se haya colado
+
+RECATEGORIZA si es obvio (ej: noticia de Perú en General → muévela a Mundo)
+
+Todo lo demás: inclúyelo sin filtrar por importancia.
+Sin emojis, sin markdown, solo texto plano.
+
+{headlines}\
 """
 
 
-def deduplicate_articles(articles: list[Article], api_key: str, model: str = "mistral-small-latest") -> list[Article]:
+def deduplicate_articles(articles: list[Article], api_key: str, model: str = _DEFAULT_MODEL) -> list[Article]:
     """
     Sends all scraped articles to Mistral and returns the deduplicated subset.
-    The LLM picks the best article from each group of duplicates.
     Falls back to the original list if the call fails or parsing fails.
     """
     if len(articles) < 2:
@@ -71,10 +96,10 @@ def deduplicate_articles(articles: list[Article], api_key: str, model: str = "mi
         return articles
 
 
-def curate_notification(articles: list[Article], api_key: str, model: str = "mistral-small-latest") -> str | None:
+def curate_notification(articles: list[Article], api_key: str, model: str = _DEFAULT_MODEL) -> str | None:
     """
-    Asks Mistral to pick the most relevant articles and format them as a
-    push notification body. Returns None on failure so the caller can fall back.
+    Asks Mistral to format articles as a push notification body.
+    Returns None on failure so the caller can fall back to default formatting.
     """
     filtered = [a for a in articles if categorizar(a.title) not in SKIP_NOTIFY]
     if not filtered:
@@ -92,10 +117,10 @@ def curate_notification(articles: list[Article], api_key: str, model: str = "mis
             json={
                 "model": model,
                 "messages": [{"role": "user", "content": _NOTIFY_PROMPT.format(headlines=headlines)}],
-                "max_tokens": 350,
+                "max_tokens": 1024,
                 "temperature": 0.2,
             },
-            timeout=20,
+            timeout=30,
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
