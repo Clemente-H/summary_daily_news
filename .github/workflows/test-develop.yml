@@ -25,4 +25,4 @@ jobs:
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY_DEV }}
         run: |
-          python main.py --limit 25 --notify ${{ secrets.NTFY_TOPIC_DEV }} --dry-run
+          python main.py --limit 25 --notify ${{ secrets.NTFY_TOPIC_DEV }}
