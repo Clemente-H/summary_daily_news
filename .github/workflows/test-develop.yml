@@ -1,0 +1,28 @@
+name: Test develop
+
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Run scrape + LLM (dry-run)
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY_DEV }}
+        run: |
+          python main.py --limit 25 --notify ${{ secrets.NTFY_TOPIC_DEV }} --dry-run

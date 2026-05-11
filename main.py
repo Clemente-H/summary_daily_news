@@ -4,91 +4,30 @@ Fuentes: The Clinic, La Tercera, El Mercurio Digital
 """
 import argparse
 import html as html_module
+import os
 from datetime import date
-
-from sentence_transformers import SentenceTransformer, util
 
 from scrapers import Article, scrape_theclinic, scrape_latercera, scrape_elmercurio
 from categories import categorizar
 from notifications import notify_ntfy
 
 
-_embed_model = None
-
-def _get_model():
-    global _embed_model
-    if _embed_model is None:
-        _embed_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-    return _embed_model
-
-
-# ─── Deduplicación ────────────────────────────────────────────────────────────
-
-def deduplicate(articles: list[Article], threshold: float = 0.75) -> list[Article]:
-    """
-    Agrupa artículos similares por similitud semántica.
-    Detecta la misma noticia aunque cada medio la redacte distinto.
-    """
-    if len(articles) < 2:
-        return articles
-
-    titles = [a.title for a in articles]
-    model = _get_model()
-    embeddings = model.encode(titles, convert_to_tensor=True)
-    sim = util.cos_sim(embeddings, embeddings).cpu().numpy()
-
-    parent = list(range(len(articles)))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for i in range(len(articles)):
-        for j in range(i + 1, len(articles)):
-            if sim[i, j] >= threshold:
-                parent[find(i)] = find(j)
-
-    groups: dict[int, list[Article]] = {}
-    for i, article in enumerate(articles):
-        groups.setdefault(find(i), []).append(article)
-
-    result = []
-    for group in groups.values():
-        best = max(group, key=lambda a: (a.summary is not None, a.source == "The Clinic", len(a.title)))
-        sources = list({a.source for a in group})
-        if len(sources) > 1:
-            best = Article(
-                source=" + ".join(sorted(sources)),
-                title=best.title,
-                url=best.url,
-                summary=best.summary,
-                category=best.category,
-            )
-        result.append(best)
-
-    return result
-
-
 # ─── Round-robin ──────────────────────────────────────────────────────────────
 
 def interleave(articles: list[Article], limit: int) -> list[Article]:
-    """Mezcla artículos en round-robin por fuente. Multi-fuente va primero."""
-    multi = [a for a in articles if "+" in a.source]
+    """Mezcla artículos en round-robin por fuente."""
     by_source: dict[str, list[Article]] = {}
     for a in articles:
-        if "+" not in a.source:
-            by_source.setdefault(a.source, []).append(a)
+        by_source.setdefault(a.source, []).append(a)
 
     result = []
     queues = list(by_source.values())
-    while any(queues) and len(result) < limit - len(multi):
+    while any(queues) and len(result) < limit:
         for q in queues:
-            if q:
+            if q and len(result) < limit:
                 result.append(q.pop(0))
 
-    return (multi + result)[:limit]
+    return result
 
 
 # ─── Render HTML ──────────────────────────────────────────────────────────────
@@ -168,42 +107,64 @@ def main():
     parser = argparse.ArgumentParser(description="DailyNews - resumen de portadas")
     parser.add_argument("--limit", type=int, default=25, help="Máximo de artículos (default: 25)")
     parser.add_argument("--notify", metavar="TOPIC", help="Topic de ntfy.sh para notificación push")
+    parser.add_argument(
+        "--mistral-key", metavar="KEY",
+        default=os.environ.get("MISTRAL_API_KEY"),
+        help="Mistral API key para deduplicar y curar notificación (o env MISTRAL_API_KEY)",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Imprime la notificación sin enviarla")
     args = parser.parse_args()
 
+    # ─── Scraping ─────────────────────────────────────────────────────────────
     print("Scrapeando fuentes...")
     sources = [
-        ("The Clinic (RSS)", scrape_theclinic),
-        ("La Tercera",       scrape_latercera),
+        ("The Clinic",          scrape_theclinic),
+        ("La Tercera",          scrape_latercera),
         ("El Mercurio Digital", scrape_elmercurio),
     ]
-    scraped: dict[str, list[Article]] = {}
+    all_raw: list[Article] = []
     for label, fn in sources:
         print(f"  → {label}...")
         items = fn()
         print(f"     {len(items)} artículos")
-        scraped[label] = items
+        all_raw.extend(items)
 
-    # Deduplicar primero dentro de cada fuente, luego entre fuentes
-    deduped_per_source = [deduplicate(items) for items in scraped.values()]
-    all_deduped = deduplicate([a for items in deduped_per_source for a in items])
-    print(f"\nTotal: {sum(len(v) for v in scraped.values())} → {len(all_deduped)} tras deduplicar")
+    # ─── Antes del LLM ────────────────────────────────────────────────────────
+    print(f"\n─── Antes del LLM ({len(all_raw)} artículos) " + "─" * 30)
+    for a in all_raw:
+        print(f"  [{a.source:<22}] [{categorizar(a.title):<12}] {a.title[:65]}")
 
-    final = interleave(all_deduped, args.limit)
+    # ─── Deduplicación con LLM ────────────────────────────────────────────────
+    if args.mistral_key:
+        from llm import deduplicate_articles
+        print(f"\nDeduplicando con LLM ({len(all_raw)} artículos)...")
+        deduped = deduplicate_articles(all_raw, args.mistral_key)
+    else:
+        print("\nSin MISTRAL_API_KEY — omitiendo deduplicación")
+        deduped = all_raw
+
+    kept_titles = {a.title for a in deduped}
+    removed = [a for a in all_raw if a.title not in kept_titles]
+
+    # ─── Después del LLM ──────────────────────────────────────────────────────
+    print(f"\n─── Después del LLM ({len(deduped)} artículos, -{len(removed)} duplicados) " + "─" * 20)
+    for a in deduped:
+        print(f"  [OK  ] [{a.source:<22}] [{categorizar(a.title):<12}] {a.title[:55]}")
+    if removed:
+        print()
+        for a in removed:
+            print(f"  [DROP] [{a.source:<22}] [{categorizar(a.title):<12}] {a.title[:55]}")
+
+    # ─── Selección final + HTML ───────────────────────────────────────────────
+    final = interleave(deduped, args.limit)
 
     output_path = f"digest_{date.today().isoformat()}.html"
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(render_html(final))
-    print(f"Digest: {output_path} ({len(final)} artículos)")
+    print(f"\nDigest: {output_path} ({len(final)} artículos)")
 
     if args.notify:
-        notify_ntfy(args.notify, final)
-
-    print("\n─── Preview ───────────────────────────────────────────")
-    for a in final[:10]:
-        cat = categorizar(a.title)
-        print(f"[{a.source}] [{cat}] {a.title[:70]}")
-        if a.summary:
-            print(f"    {a.summary[:100]}")
+        notify_ntfy(args.notify, final, llm_key=args.mistral_key, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

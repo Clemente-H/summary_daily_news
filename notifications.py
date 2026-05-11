@@ -9,12 +9,8 @@ from scrapers import Article
 from categories import categorizar, ORDEN, SKIP_NOTIFY
 
 
-def notify_ntfy(topic: str, articles: list[Article]) -> None:
-    """
-    Envía un resumen push via ntfy.sh.
-    En el teléfono: instalar app ntfy y suscribirse al mismo topic.
-    """
-    # Agrupar por categoría
+def _format_body(articles: list[Article]) -> str:
+    """Default formatting: grouped by category, all headlines."""
     by_cat: dict[str, list[Article]] = {}
     for a in articles:
         by_cat.setdefault(categorizar(a.title), []).append(a)
@@ -33,10 +29,36 @@ def notify_ntfy(topic: str, articles: list[Article]) -> None:
 
     shown = len(articles) - skipped
     footer = f"\n\n+ {skipped} de Cultura/Farándula" if skipped else ""
-    body = f"{shown} noticias · {date.today().strftime('%d/%m')}\n\n" + "\n\n".join(sections) + footer
+    return f"{shown} noticias · {date.today().strftime('%d/%m')}\n\n" + "\n\n".join(sections) + footer
+
+
+def notify_ntfy(topic: str, articles: list[Article], llm_key: str | None = None, dry_run: bool = False) -> None:
+    """
+    Envía un resumen push via ntfy.sh.
+    En el teléfono: instalar app ntfy y suscribirse al mismo topic.
+    Si se pasa llm_key, usa Mistral para filtrar y reformatear el cuerpo.
+    Si dry_run=True, imprime el body sin hacer el POST.
+    """
+    body: str | None = None
+    if llm_key:
+        from llm import curate_notification
+        print("  Curating con LLM...")
+        curated = curate_notification(articles, llm_key)
+        if curated:
+            shown = sum(1 for a in articles if categorizar(a.title) not in SKIP_NOTIFY)
+            body = f"{shown} noticias · {date.today().strftime('%d/%m')}\n\n{curated}"
+
+    if body is None:
+        body = _format_body(articles)
 
     # ntfy tiene límite de 4096 bytes
     body = body.encode("utf-8")[:4096].decode("utf-8", errors="ignore")
+
+    if dry_run:
+        print("\n─── Notificación (dry-run) ───────────────────────────")
+        print(body)
+        print("─────────────────────────────────────────────────────")
+        return
 
     try:
         requests.post(
