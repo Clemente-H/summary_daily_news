@@ -25,6 +25,13 @@ jobs:
 
       - name: Run DailyNews
         env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
         run: |
-          python main.py --limit 25 --notify "$NTFY_TOPIC"
+          python main.py --limit 25 --notify ${{ secrets.NTFY_TOPIC }}
+
+      - name: Upload HTML digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ github.run_id }}
+          path: digest_*.html
+          retention-days: 3

@@ -49,7 +49,8 @@ def notify_ntfy(topic: str, articles: list[Article], llm_key: str | None = None,
             body = f"{shown} noticias · {date.today().strftime('%d/%m')}\n\n{curated}"
 
     if body is None:
-        body = _format_body(articles)
+        llm_failed = llm_key is not None  # key presente pero falló
+        body = ("[ LLM no disponible — resumen sin procesar ]\n\n" if llm_failed else "") + _format_body(articles)
 
     # ntfy tiene límite de 4096 bytes
     body = body.encode("utf-8")[:4096].decode("utf-8", errors="ignore")
